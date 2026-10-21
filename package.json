@@ -2,9 +2,15 @@
   "name": "oxygen",
   "private": true,
   "version": "0.0.0",
+
+  "homepage": "https://MohamedSamir1919.github.io/oxygen-wash",
+
   "type": "module",
   "scripts": {
     "dev": "vite",
+
+    "predeploy": "npm run build",
+  "deploy": "gh-pages -d dist",
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview"
