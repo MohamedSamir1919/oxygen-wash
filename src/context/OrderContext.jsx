@@ -1,0 +1,189 @@
+import { useContext, useEffect, useState } from 'react'
+import { AuthContext } from './authContext.js'
+import { OrderContext } from './orderContext.js'
+import { normalizeOrder } from '../data/orders.js'
+
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api'
+const TRACKING_KEY = 'oxygen_order_tracking_tokens'
+const LATEST_ORDER_KEY = 'oxygen_latest_order'
+
+async function requestJson(path, options = {}) {
+  const response = await fetch(`${API_URL}${path}`, options)
+  const result = await response.json()
+  if (!response.ok) throw new Error(result.message || 'تعذر الاتصال بالخادم')
+  return result
+}
+
+export function OrderProvider({ children }) {
+  const { user, token, loading: authLoading } = useContext(AuthContext)
+  const [cart, setCart] = useState([])
+  const [orders, setOrders] = useState([])
+  const [drivers, setDrivers] = useState([])
+  const [catalogItems, setCatalogItems] = useState([])
+  const [catalogServices, setCatalogServices] = useState([])
+  const [catalogLoading, setCatalogLoading] = useState(true)
+  const [catalogError, setCatalogError] = useState('')
+  const [latestOrderId, setLatestOrderId] = useState(() => localStorage.getItem(LATEST_ORDER_KEY))
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [selectedOrderServiceIds, setSelectedOrderServiceIds] = useState([])
+  const cartCount = cart.reduce((sum, item) => sum + item.quantity, 0)
+  const subtotal = cart.reduce((sum, item) => sum + item.price * item.quantity, 0)
+  const orderServices = catalogServices.filter((service) => service.applyTo === 'order')
+  const extras = orderServices.filter((service) => selectedOrderServiceIds.includes(service._id)).reduce((sum, service) => sum + service.extra, 0)
+  const latestOrder = orders.find((order) => order.id === latestOrderId) || null
+
+  useEffect(() => {
+    if (authLoading) return undefined
+
+    let active = true
+    async function loadOrders() {
+      setLoading(true)
+      setError('')
+      try {
+        if (user?.role === 'admin' || user?.role === 'driver') {
+          const route = user.role === 'admin' ? '/admin/orders' : '/driver/orders'
+          const result = await requestJson(route, { headers: { Authorization: `Bearer ${token}` } })
+          if (active) setOrders(result.orders.map(normalizeOrder))
+          if (user.role === 'admin') {
+            const driverResult = await requestJson('/admin/orders/drivers', { headers: { Authorization: `Bearer ${token}` } })
+            if (active) setDrivers(driverResult.drivers)
+          }
+        } else {
+          const trackingTokens = JSON.parse(localStorage.getItem(TRACKING_KEY) || '[]')
+          const results = await Promise.all(trackingTokens.map((trackingToken) => requestJson(`/orders/track/${trackingToken}`)))
+          if (active) setOrders(results.map((result) => normalizeOrder(result.order)))
+        }
+      } catch (loadError) {
+        if (active) setError(loadError.message || 'تعذر تحميل الطلبات')
+      } finally {
+        if (active) setLoading(false)
+      }
+    }
+
+    loadOrders()
+    return () => { active = false }
+  }, [authLoading, token, user?.id, user?.role])
+
+  useEffect(() => {
+    if (authLoading) return undefined
+
+    let active = true
+    const isAdmin = user?.role === 'admin'
+    requestJson(isAdmin ? '/admin/catalog' : '/catalog', isAdmin ? { headers: { Authorization: `Bearer ${token}` } } : {})
+      .then((result) => {
+        if (!active) return
+        setCatalogItems(result.items)
+        setCatalogServices(result.services)
+        setCatalogError('')
+      })
+      .catch((catalogLoadError) => {
+        if (active) setCatalogError(catalogLoadError.message || 'تعذر تحميل الكتالوج')
+      })
+      .finally(() => {
+        if (active) setCatalogLoading(false)
+      })
+
+    return () => { active = false }
+  }, [authLoading, token, user?.role])
+
+  function addItem(item, service) {
+    const lineId = `${item._id}-${service._id}`
+    setCart((current) => {
+      const existing = current.find((line) => line.lineId === lineId)
+      if (existing) return current.map((line) => line.lineId === lineId ? { ...line, quantity: line.quantity + 1 } : line)
+      return [...current, { ...item, itemId: item._id, serviceId: service._id, lineId, service: service.name, price: Math.max(8, item.price + service.extra), quantity: 1 }]
+    })
+  }
+
+  function changeQuantity(lineId, amount) {
+    setCart((current) => current.map((item) => item.lineId === lineId ? { ...item, quantity: item.quantity + amount } : item).filter((item) => item.quantity > 0))
+  }
+
+  async function placeOrder(details) {
+    const result = await requestJson('/orders', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        customer: { name: details.name, phone: details.phone, address: details.address, landmark: details.landmark },
+        items: cart.map((item) => ({ itemId: item.itemId, serviceId: item.serviceId, quantity: item.quantity })),
+        total: subtotal + extras,
+        extras: { serviceIds: selectedOrderServiceIds },
+        paymentMethod: details.payment,
+        pickupWindow: details.pickup,
+        deliveryHours: details.delivery,
+      }),
+    })
+    const order = normalizeOrder(result.order)
+    const trackingTokens = JSON.parse(localStorage.getItem(TRACKING_KEY) || '[]')
+    localStorage.setItem(TRACKING_KEY, JSON.stringify([result.order.trackingToken, ...trackingTokens]))
+    localStorage.setItem(LATEST_ORDER_KEY, order.id)
+    setLatestOrderId(order.id)
+    setOrders((current) => [order, ...current])
+    setCart([])
+    setSelectedOrderServiceIds([])
+    return order
+  }
+
+  async function assignOrder(orderId, driverId) {
+    const result = await requestJson(`/admin/orders/${orderId}/assign`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ driverId }),
+    })
+    const updatedOrder = normalizeOrder(result.order)
+    setOrders((current) => current.map((order) => order._id === orderId ? updatedOrder : order))
+    return updatedOrder
+  }
+
+  async function updateOrderStatus(orderId, status) {
+    const route = user?.role === 'admin' ? `/admin/orders/${orderId}/status` : `/driver/orders/${orderId}/status`
+    const result = await requestJson(route, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ status }),
+    })
+    const updatedOrder = normalizeOrder(result.order)
+    setOrders((current) => current.map((order) => order._id === orderId ? updatedOrder : order))
+    return updatedOrder
+  }
+
+  async function createCatalogRecord(kind, values) {
+    const plural = kind === 'item' ? 'items' : 'services'
+    const result = await requestJson(`/admin/catalog/${plural}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify(values),
+    })
+    if (kind === 'item') setCatalogItems((current) => [...current, result.item].sort((first, second) => first.category.localeCompare(second.category, 'ar')))
+    else setCatalogServices((current) => [...current, result.service].sort((first, second) => first.name.localeCompare(second.name, 'ar')))
+    return kind === 'item' ? result.item : result.service
+  }
+
+  async function updateCatalogRecord(kind, recordId, values) {
+    const plural = kind === 'item' ? 'items' : 'services'
+    const result = await requestJson(`/admin/catalog/${plural}/${recordId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify(values),
+    })
+    const record = kind === 'item' ? result.item : result.service
+    if (kind === 'item') setCatalogItems((current) => current.map((item) => item._id === recordId ? record : item).sort((first, second) => first.category.localeCompare(second.category, 'ar')))
+    else setCatalogServices((current) => current.map((service) => service._id === recordId ? record : service).sort((first, second) => first.name.localeCompare(second.name, 'ar')))
+    return record
+  }
+
+  function setOrderService(serviceId, enabled) {
+    setSelectedOrderServiceIds((current) => enabled
+      ? [...new Set([...current, serviceId])]
+      : current.filter((id) => id !== serviceId))
+  }
+
+  const value = {
+    cart, cartCount, subtotal, extras, total: subtotal + extras, orders, latestOrder, drivers, loading, error,
+    catalogItems, catalogServices, catalogLoading, catalogError, orderServices, selectedOrderServiceIds,
+    addItem, changeQuantity, placeOrder, assignOrder, updateOrderStatus, createCatalogRecord, updateCatalogRecord, setOrderService,
+  }
+
+  return <OrderContext.Provider value={value}>{children}</OrderContext.Provider>
+}
