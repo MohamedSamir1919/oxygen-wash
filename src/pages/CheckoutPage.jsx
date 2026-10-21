@@ -6,7 +6,7 @@ import { EmptyState, PageHeading } from '../components/Shared.jsx'
 
 function CheckoutPage() {
   const navigate = useNavigate()
-  const { cart, cartCount, subtotal, extras, total, changeQuantity, orderServices, selectedOrderServiceIds, setOrderService, placeOrder, latestOrder } = useOrder()
+  const { cart, cartCount, subtotal, extras, total, changeQuantity, getCartLinePrice, orderServices, selectedOrderServiceIds, setOrderService, placeOrder, latestOrder } = useOrder()
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
@@ -66,7 +66,7 @@ function CheckoutPage() {
         <aside style={{ display: 'grid', alignContent: 'start', gap: 16 }}>
           <section className="panel" style={{ padding: 20 }}>
             <h2 className="section-title">تفاصيل القطع <span style={{ color: 'var(--muted)', fontWeight: 400 }}>({cartCount})</span></h2>
-            <div style={{ marginTop: 12 }}>{cart.map((item) => <div key={item.lineId} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, borderTop: '1px solid #f0f2ef', padding: '12px 0' }}><div><strong style={{ fontSize: 11 }}>{item.name}</strong><div className="order-muted">{item.service} · {item.price} ج.م</div></div><div style={{ display: 'flex', alignItems: 'center', gap: 7 }}><button type="button" className="add-item" onClick={() => changeQuantity(item.lineId, -1)} aria-label="تقليل الكمية">{item.quantity === 1 ? <Trash2 size={13} /> : <Minus size={13} />}</button><span style={{ minWidth: 15, textAlign: 'center', fontSize: 11 }}>{item.quantity}</span><button type="button" className="add-item" onClick={() => changeQuantity(item.lineId, 1)} aria-label="زيادة الكمية"><Plus size={13} /></button></div></div>)}</div>
+            <div style={{ marginTop: 12 }}>{cart.map((item) => <div key={item.lineId} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, borderTop: '1px solid #f0f2ef', padding: '12px 0' }}><div><strong style={{ fontSize: 11 }}>{item.name}</strong><div className="order-muted">{item.service} · {getCartLinePrice(item)} ج.م للقطعة</div></div><div style={{ display: 'flex', alignItems: 'center', gap: 7 }}><button type="button" className="add-item" onClick={() => changeQuantity(item.lineId, -1)} aria-label="تقليل الكمية">{item.quantity === 1 ? <Trash2 size={13} /> : <Minus size={13} />}</button><span style={{ minWidth: 15, textAlign: 'center', fontSize: 11 }}>{item.quantity}</span><button type="button" className="add-item" onClick={() => changeQuantity(item.lineId, 1)} aria-label="زيادة الكمية"><Plus size={13} /></button></div></div>)}</div>
             <Link to="/catalog" className="secondary-button" style={{ minHeight: 35, width: '100%' }}><Plus size={14} /> أضف قطع تانية</Link>
             <div style={{ display: 'grid', gap: 9, marginTop: 18, borderTop: '1px solid var(--line)', paddingTop: 15, fontSize: 11 }}><div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: 'var(--muted)' }}>قيمة القطع</span><span>{subtotal} ج.م</span></div>{extras > 0 && <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: 'var(--muted)' }}>الإضافات</span><span>{extras} ج.م</span></div>}<div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid var(--line)', paddingTop: 12, fontSize: 14, fontWeight: 700 }}><span>الإجمالي</span><span>{total} ج.م</span></div></div>
           </section>

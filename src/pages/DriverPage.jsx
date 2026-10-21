@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { Check, MapPin, Navigation, PackageCheck, Phone, Printer, Shirt, Truck } from 'lucide-react'
 import { PageHeading, SectionHeading, StatusPill } from '../components/Shared.jsx'
 import { useOrder } from '../context/useOrder.js'
@@ -7,15 +8,27 @@ import { formatOrderDate, getOrderStatusLabel } from '../data/orders.js'
 function DriverPage() {
   const { user } = useAuth()
   const { orders, loading, error, updateOrderStatus } = useOrder()
+  const [actionError, setActionError] = useState('')
+  const [updatingOrderId, setUpdatingOrderId] = useState(null)
   const pendingTasks = orders.filter((order) => order.status !== 'delivered')
   const readyTasks = orders.filter((order) => order.status === 'ready_for_delivery')
 
   async function completeTask(order) {
-    const nextStatus = order.status === 'assigned' ? 'picked_up' : order.status === 'picked_up' ? 'processing' : 'delivered'
+    const nextStatus = {
+      assigned: 'picked_up',
+      picked_up: 'processing',
+      ready_for_delivery: 'delivered',
+    }[order.status]
+    if (!nextStatus || updatingOrderId) return
+
+    setUpdatingOrderId(order._id)
+    setActionError('')
     try {
       await updateOrderStatus(order._id, nextStatus)
     } catch (taskError) {
-      window.alert(taskError.message || 'تعذر تحديث المهمة')
+      setActionError(taskError.message || 'تعذر تحديث المهمة')
+    } finally {
+      setUpdatingOrderId(null)
     }
   }
 
@@ -23,10 +36,11 @@ function DriverPage() {
     <div className="content fade-in">
       <PageHeading eyebrow="مهام المندوب" title={`أهلاً يا ${user?.displayName || user?.username || 'مندوبنا'}`} subtitle={`عندك ${pendingTasks.length.toLocaleString('ar-EG')} طلبات مسندة إليك.`} action={<button className="secondary-button" onClick={() => window.print()}><Printer size={15} /> طباعة خط السير</button>} />
       {error && <p role="alert" style={{ marginBottom: 12, color: '#a13d32', fontSize: 12 }}>{error}</p>}
+      {actionError && <p role="alert" style={{ marginBottom: 12, color: '#a13d32', fontSize: 12 }}>{actionError}</p>}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <div className="stat-card"><div className="stat-label">الطلبات المسندة</div><div className="stat-value">{pendingTasks.length.toLocaleString('ar-EG')}</div><div className="stat-foot"><Truck size={13} /> استلام وتسليم</div></div>
-        <div className="stat-card"><div className="stat-label">قطع جاهزة للتسليم</div><div className="stat-value">{readyTasks.reduce((sum, order) => sum + order.items.reduce((count, item) => count + item.quantity, 0), 0).toLocaleString('ar-EG')}</div><div className="stat-foot"><Shirt size={13} /> في طلبات جاهزة</div></div>
-        <div className="stat-card"><div className="stat-label">طلبات مكتملة</div><div className="stat-value">{orders.filter((order) => order.status === 'delivered').length.toLocaleString('ar-EG')}</div><div className="stat-foot"><Check size={13} /> إجمالي ما تم تسليمه</div></div>
+        <div className="stat-card"><div className="stat-label">قطع جاهزة للتسليم</div><div className="stat-value">{readyTasks.reduce((sum, order) => sum + order.lineItems.reduce((count, item) => count + (Number(item.quantity) || 0), 0), 0).toLocaleString('ar-EG')}</div><div className="stat-foot"><Shirt size={13} /> في طلبات جاهزة</div></div>
+        <div className="stat-card"><div className="stat-label">طلبات مكتملة</div><div className="stat-value">{orders?.filter((order) => order.status === 'delivered').length.toLocaleString('ar-EG')}</div><div className="stat-foot"><Check size={13} /> إجمالي ما تم تسليمه</div></div>
       </div>
 
       <section style={{ marginTop: 25 }}>
@@ -42,7 +56,15 @@ function DriverPage() {
                 <div className="order-muted" style={{ marginTop: 8 }}>{task.lineItems.map((item) => `${item.quantity || 0} ${item.name || 'قطعة'} · ${item.service || 'خدمة'}`).join('، ') || 'لا توجد تفاصيل للقطع'}</div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginTop: 13, borderTop: '1px solid #f0f2ef', paddingTop: 12 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}><Shirt size={15} color="#16765c" /><span style={{ fontSize: 10 }}>{task.lineItems.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0)} قطعة</span></div>
-                  <div style={{ display: 'flex', gap: 7 }}><a className="icon-button" href={`tel:${task.customer.phone}`} aria-label={`اتصل بالعميل ${task.customer.name}`}><Phone size={15} /></a><a className="icon-button" href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(task.customer.address)}`} target="_blank" rel="noreferrer" aria-label="افتح الموقع على خرائط جوجل"><Navigation size={14} /></a>{['assigned', 'picked_up', 'ready_for_delivery'].includes(task.status) && <button className="primary-button" style={{ minHeight: 35, paddingInline: 11 }} onClick={() => completeTask(task)}>{task.status === 'assigned' ? 'تم الاستلام من العميل' : task.status === 'picked_up' ? 'وصلت للمغسلة' : 'تم التسليم'} <Check size={14} /></button>}</div>
+                  <div style={{ display: 'flex', gap: 7 }}>
+                    <a className="icon-button" href={`tel:${task.customer.phone}`} 
+                    aria-label={`اتصل بالعميل ${task.customer.name}`}>
+                      <Phone size={15} /></a>
+                      <a className="icon-button" 
+                      href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(task.customer.address)}`} target="_blank" rel="noreferrer" 
+                      aria-label="افتح الموقع على خرائط جوجل"><Navigation size={14} /></a>
+                       {task.status === 'processing' && <span className="order-muted">بانتظار تأكيد الإدارة لجهوزية التسليم</span>}
+                       {['assigned', 'picked_up', 'ready_for_delivery'].includes(task.status) && <button className="primary-button" disabled={updatingOrderId === task._id} style={{ minHeight: 35, paddingInline: 11 }} onClick={() => completeTask(task)}>{updatingOrderId === task._id ? 'جارٍ التحديث...' : task.status === 'assigned' ? 'تم الاستلام من العميل' : task.status === 'picked_up' ? 'وصلت للمغسلة' : 'تم التسليم'} <Check size={14} /></button>}</div>
                 </div>
               </div>
             </div>

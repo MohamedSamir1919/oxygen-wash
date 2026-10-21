@@ -30,14 +30,25 @@ export function OrderProvider({ children }) {
   const [drivers, setDrivers] = useState([])
   const [catalogItems, setCatalogItems] = useState([])
   const [catalogServices, setCatalogServices] = useState([])
+  const [catalogPrices, setCatalogPrices] = useState([])
   const [catalogLoading, setCatalogLoading] = useState(true)
   const [catalogError, setCatalogError] = useState('')
   const [latestOrderId, setLatestOrderId] = useState(() => localStorage.getItem(LATEST_ORDER_KEY))
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [selectedOrderServiceIds, setSelectedOrderServiceIds] = useState([])
+  function getItemServicePrice(itemId, serviceId) {
+    const price = catalogPrices.find((entry) => String(entry.item?._id || entry.item) === itemId
+      && String(entry.service?._id || entry.service) === serviceId)?.price
+    return Number.isFinite(price) ? price : null
+  }
+
+  function getCartLinePrice(line) {
+    return getItemServicePrice(line.itemId, line.serviceId) ?? line.price
+  }
+
   const cartCount = cart.reduce((sum, item) => sum + item.quantity, 0)
-  const subtotal = cart.reduce((sum, item) => sum + item.price * item.quantity, 0)
+  const subtotal = cart.reduce((sum, item) => sum + getCartLinePrice(item) * item.quantity, 0)
   const orderServices = catalogServices.filter((service) => service.applyTo === 'order')
   const extras = orderServices.filter((service) => selectedOrderServiceIds.includes(service._id)).reduce((sum, service) => sum + service.extra, 0)
   const latestOrder = orders.find((order) => order.id === latestOrderId) || null
@@ -75,7 +86,20 @@ export function OrderProvider({ children }) {
     }
 
     loadOrders()
-    return () => { active = false }
+    const refreshInterval = user?.role === 'admin' || user?.role === 'driver' ? window.setInterval(async () => {
+      try {
+        const route = user.role === 'admin' ? '/admin/orders' : '/driver/orders'
+        const result = await requestJson(route, { headers: { Authorization: `Bearer ${token}` } })
+        if (active) setOrders(Array.isArray(result.orders) ? result.orders.filter((order) => order && typeof order === 'object').map(normalizeOrder) : [])
+      } catch {
+        // Keep the last successful task list if a background refresh fails.
+      }
+    }, 8000) : null
+
+    return () => {
+      active = false
+      if (refreshInterval) window.clearInterval(refreshInterval)
+    }
   }, [authLoading, token, user?.id, user?.role])
 
   useEffect(() => {
@@ -83,17 +107,25 @@ export function OrderProvider({ children }) {
 
     let active = true
     const isAdmin = user?.role === 'admin'
-    requestJson(isAdmin ? '/admin/catalog' : '/catalog', isAdmin ? { headers: { Authorization: `Bearer ${token}` } } : {})
+    const catalogRoute = isAdmin ? '/admin/catalog' : '/catalog'
+    const options = isAdmin ? { headers: { Authorization: `Bearer ${token}` } } : {}
+    function applyCatalog(result) {
+      setCatalogItems(Array.isArray(result.items) ? result.items.filter((item) => item && typeof item === 'object') : [])
+      setCatalogServices(Array.isArray(result.services) ? result.services.filter((service) => service && typeof service === 'object') : [])
+      setCatalogPrices(Array.isArray(result.prices) ? result.prices.filter((price) => price && typeof price === 'object') : [])
+      setCatalogError('')
+    }
+
+    requestJson(catalogRoute, options)
       .then((result) => {
         if (!active) return
-        setCatalogItems(Array.isArray(result.items) ? result.items.filter((item) => item && typeof item === 'object') : [])
-        setCatalogServices(Array.isArray(result.services) ? result.services.filter((service) => service && typeof service === 'object') : [])
-        setCatalogError('')
+        applyCatalog(result)
       })
       .catch((catalogLoadError) => {
         if (active) {
           setCatalogItems([])
           setCatalogServices([])
+          setCatalogPrices([])
           setCatalogError(catalogLoadError.message || 'تعذر تحميل الكتالوج')
         }
       })
@@ -101,15 +133,26 @@ export function OrderProvider({ children }) {
         if (active) setCatalogLoading(false)
       })
 
-    return () => { active = false }
+    const refreshInterval = window.setInterval(() => {
+      requestJson(catalogRoute, options)
+        .then((result) => { if (active) applyCatalog(result) })
+        .catch(() => {})
+    }, 15000)
+
+    return () => {
+      active = false
+      window.clearInterval(refreshInterval)
+    }
   }, [authLoading, token, user?.role])
 
   function addItem(item, service) {
+    const pairPrice = getItemServicePrice(item._id, service._id)
+    if (pairPrice === null) return
     const lineId = `${item._id}-${service._id}`
     setCart((current) => {
       const existing = current.find((line) => line.lineId === lineId)
       if (existing) return current.map((line) => line.lineId === lineId ? { ...line, quantity: line.quantity + 1 } : line)
-      return [...current, { ...item, itemId: item._id, serviceId: service._id, lineId, service: service.name, price: Math.max(8, item.price + service.extra), quantity: 1 }]
+      return [...current, { ...item, itemId: item._id, serviceId: service._id, lineId, service: service.name, price: pairPrice, quantity: 1 }]
     })
   }
 
@@ -177,8 +220,15 @@ export function OrderProvider({ children }) {
     })
     const record = kind === 'item' ? result.item : result.service
     if (!record || typeof record !== 'object') throw new Error('استجابة حفظ الكتالوج غير مكتملة')
-    if (kind === 'item') setCatalogItems((current) => [...current, record].sort((first, second) => (first.category || '').localeCompare(second.category || '', 'ar')))
-    else setCatalogServices((current) => [...current, record].sort((first, second) => (first.name || '').localeCompare(second.name || '', 'ar')))
+    if (kind === 'item') {
+      setCatalogItems((current) => [...current, record].sort((first, second) => (first.category || '').localeCompare(second.category || '', 'ar')))
+      setCatalogPrices((current) => [...current, ...catalogServices.filter((service) => service.applyTo === 'item').map((service) => ({ item: record._id, service: service._id, price: Math.max(8, record.price + service.extra) }))])
+    } else {
+      setCatalogServices((current) => [...current, record].sort((first, second) => (first.name || '').localeCompare(second.name || '', 'ar')))
+      if (record.applyTo === 'item') {
+        setCatalogPrices((current) => [...current, ...catalogItems.map((item) => ({ item: item._id, service: record._id, price: Math.max(8, item.price + record.extra) }))])
+      }
+    }
     return record
   }
 
@@ -192,8 +242,36 @@ export function OrderProvider({ children }) {
     const record = kind === 'item' ? result.item : result.service
     if (!record || typeof record !== 'object') throw new Error('استجابة تحديث الكتالوج غير مكتملة')
     if (kind === 'item') setCatalogItems((current) => current.map((item) => item._id === recordId ? record : item).sort((first, second) => (first.category || '').localeCompare(second.category || '', 'ar')))
-    else setCatalogServices((current) => current.map((service) => service._id === recordId ? record : service).sort((first, second) => (first.name || '').localeCompare(second.name || '', 'ar')))
+    else {
+      const previousService = catalogServices.find((service) => service._id === recordId)
+      setCatalogServices((current) => current.map((service) => service._id === recordId ? record : service).sort((first, second) => (first.name || '').localeCompare(second.name || '', 'ar')))
+      if (record.applyTo === 'item' && previousService?.applyTo !== 'item') {
+        setCatalogPrices((current) => {
+          const next = [...current]
+          for (const item of catalogItems) {
+            if (!next.some((price) => String(price.item?._id || price.item) === item._id && String(price.service?._id || price.service) === record._id)) {
+              next.push({ item: item._id, service: record._id, price: Math.max(8, item.price + record.extra) })
+            }
+          }
+          return next
+        })
+      }
+    }
     return record
+  }
+
+  async function updateItemServicePrice(itemId, serviceId, price) {
+    const result = await requestJson('/admin/catalog/prices', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ itemId, serviceId, price }),
+    })
+    if (!result.price || typeof result.price !== 'object') throw new Error('استجابة حفظ سعر القطعة والخدمة غير مكتملة')
+    setCatalogPrices((current) => [
+      ...current.filter((entry) => !(String(entry.item) === itemId && String(entry.service) === serviceId)),
+      result.price,
+    ])
+    return result.price
   }
 
   function setOrderService(serviceId, enabled) {
@@ -204,8 +282,8 @@ export function OrderProvider({ children }) {
 
   const value = {
     cart, cartCount, subtotal, extras, total: subtotal + extras, orders, latestOrder, drivers, loading, error,
-    catalogItems, catalogServices, catalogLoading, catalogError, orderServices, selectedOrderServiceIds,
-    addItem, changeQuantity, placeOrder, assignOrder, updateOrderStatus, createCatalogRecord, updateCatalogRecord, setOrderService,
+    catalogItems, catalogServices, catalogPrices, catalogLoading, catalogError, orderServices, selectedOrderServiceIds,
+    addItem, changeQuantity, placeOrder, assignOrder, updateOrderStatus, createCatalogRecord, updateCatalogRecord, updateItemServicePrice, getItemServicePrice, getCartLinePrice, setOrderService,
   }
 
   return <OrderContext.Provider value={value}>{children}</OrderContext.Provider>

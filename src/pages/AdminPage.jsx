@@ -6,14 +6,17 @@ import { getOrderStatusLabel } from '../data/orders.js'
 import { useOrder } from '../context/useOrder.js'
 
 function AdminPage() {
-  const { orders, drivers, loading, error, assignOrder, updateOrderStatus, catalogItems, catalogServices, catalogLoading, catalogError, createCatalogRecord, updateCatalogRecord } = useOrder()
+  const { orders, drivers, loading, error, assignOrder, updateOrderStatus, catalogItems, catalogServices, catalogLoading, catalogError, createCatalogRecord, updateCatalogRecord, updateItemServicePrice, getItemServicePrice } = useOrder()
   const [itemForm, setItemForm] = useState({ name: '', category: '', price: '' })
   const [serviceForm, setServiceForm] = useState({ name: '', detail: '', extra: '0', applyTo: 'item' })
   const [itemDrafts, setItemDrafts] = useState({})
   const [serviceDrafts, setServiceDrafts] = useState({})
+  const [pairPriceDrafts, setPairPriceDrafts] = useState({})
+  const [priceServiceId, setPriceServiceId] = useState('')
   const [catalogMessage, setCatalogMessage] = useState('')
   const [catalogBusy, setCatalogBusy] = useState(false)
   const [offerEnabled, setOfferEnabled] = useState(true)
+  const [actionError, setActionError] = useState('')
   const currentOrders = orders.filter((order) => order.status !== 'delivered')
   const today = new Date().toDateString()
   const todayOrders = orders.filter((order) => new Date(order.createdAt).toDateString() === today)
@@ -27,20 +30,25 @@ function AdminPage() {
   const weeklyTotal = weeklyActivity.reduce((sum, day) => sum + day.value, 0)
   const mostOrderedItems = orders.flatMap((order) => order.lineItems).reduce((totals, item) => ({ ...totals, [item.name]: (totals[item.name] || 0) + (Number(item.quantity) || 0) }), {})
   const popularItems = Object.entries(mostOrderedItems).sort((first, second) => second[1] - first[1]).slice(0, 4)
+  const itemServices = catalogServices.filter((service) => service.applyTo === 'item')
+  const selectedPriceService = itemServices.find((service) => service._id === priceServiceId) || itemServices[0]
 
   async function handleAssignment(orderId, driverId, phase) {
+    if (!driverId) return
+    setActionError('')
     try {
       await assignOrder(orderId, driverId, phase)
     } catch (assignmentError) {
-      window.alert(assignmentError.message || 'تعذر إسناد الطلب')
+      setActionError(assignmentError.message || 'تعذر إسناد الطلب')
     }
   }
 
   async function handleStatusChange(orderId, status) {
+    setActionError('')
     try {
       await updateOrderStatus(orderId, status)
     } catch (statusError) {
-      window.alert(statusError.message || 'تعذر تحديث حالة الطلب')
+      setActionError(statusError.message || 'تعذر تحديث حالة الطلب')
     }
   }
 
@@ -104,6 +112,27 @@ function AdminPage() {
     }
   }
 
+  async function savePairPrice(item) {
+    if (!selectedPriceService) return
+    const key = `${item._id}:${selectedPriceService._id}`
+    const price = Number(pairPriceDrafts[key] ?? getItemServicePrice(item._id, selectedPriceService._id))
+    if (!Number.isFinite(price) || price < 0) {
+      setCatalogMessage('أدخل سعرًا صحيحًا للتركيبة')
+      return
+    }
+    setCatalogBusy(true)
+    setCatalogMessage('')
+    try {
+      await updateItemServicePrice(item._id, selectedPriceService._id, price)
+      setPairPriceDrafts((current) => { const next = { ...current }; delete next[key]; return next })
+      setCatalogMessage(`تم حفظ سعر ${item.name} لخدمة ${selectedPriceService.name}`)
+    } catch (priceError) {
+      setCatalogMessage(priceError.message || 'تعذر حفظ سعر التركيبة')
+    } finally {
+      setCatalogBusy(false)
+    }
+  }
+
   async function toggleCatalogRecord(kind, record) {
     setCatalogBusy(true)
     setCatalogMessage('')
@@ -146,14 +175,38 @@ function AdminPage() {
       <section style={{ marginTop: 25 }}>
         <SectionHeading title="الطلبات النشطة" note="تابع الإسناد والحالة المسجلة" action={<span className="status-pill warning">{currentOrders.length} طلبات تحتاج متابعة</span>} />
         {error && <p role="alert" style={{ marginBottom: 10, color: '#a13d32', fontSize: 12 }}>{error}</p>}
+        {actionError && <p role="alert" style={{ marginBottom: 10, color: '#a13d32', fontSize: 12 }}>{actionError}</p>}
         <div className="panel table-wrap"><table className="data-table"><thead><tr><th>رقم الطلب</th><th>العميل / القطع</th><th>الموعد</th><th>الحالة</th><th>مندوب الاستلام</th><th>مندوب التسليم</th></tr></thead><tbody>
           {currentOrders.map((order) => <tr key={order._id}>
             <td style={{ fontWeight: 700 }}>{order.id}</td>
             <td>{order.customerName}<div className="order-muted">{order.customer?.phone} · {order.items}</div></td>
             <td>{order.pickupWindow}<div className="order-muted">التسليم المتوقع: {order.expectedDeliveryAt ? new Date(order.expectedDeliveryAt).toLocaleDateString('ar-EG') : 'غير محدد'}</div></td>
             <td><StatusPill tone="warning">{getOrderStatusLabel(order.status)}</StatusPill>{order.status === 'processing' && <button className="secondary-button" style={{ minHeight: 30, marginTop: 6, paddingInline: 8 }} disabled={!order.deliveryDriver} onClick={() => handleStatusChange(order._id, 'ready_for_delivery')}>جاهز للتسليم</button>}</td>
-            <td>{['confirmed', 'assigned'].includes(order.status) ? <select aria-label={`اختيار مندوب الاستلام للطلب ${order.id}`} value={order.pickupDriver?._id || order.assignedDriver?._id || ''} onChange={(event) => handleAssignment(order._id, event.target.value, 'pickup')} disabled={drivers.length === 0} style={{ border: '1px solid var(--line)', borderRadius: 6, background: '#fff', padding: '7px 8px', color: order.pickupDriver || order.assignedDriver ? 'var(--green)' : 'var(--muted)', fontSize: 10 }}><option value="">اختار مندوب الاستلام</option>{drivers.map((driver) => <option key={driver._id} value={driver._id}>{driver.displayName || driver.username}</option>)}</select> : <span>{order.pickupDriver?.displayName || order.pickupDriver?.username || order.assignedDriver?.displayName || order.assignedDriver?.username || 'غير محدد'}</span>}</td>
-            <td>{['processing', 'ready_for_delivery'].includes(order.status) ? <select aria-label={`اختيار مندوب التسليم للطلب ${order.id}`} value={order.deliveryDriver?._id || ''} onChange={(event) => handleAssignment(order._id, event.target.value, 'delivery')} disabled={drivers.length === 0} style={{ border: '1px solid var(--line)', borderRadius: 6, background: '#fff', padding: '7px 8px', color: order.deliveryDriver ? 'var(--green)' : 'var(--muted)', fontSize: 10 }}><option value="">اختار مندوب التسليم</option>{drivers.map((driver) => <option key={driver._id} value={driver._id}>{driver.displayName || driver.username}</option>)}</select> : <span>{order.deliveryDriver?.displayName || order.deliveryDriver?.username || (order.status === 'delivered' ? 'تم التسليم' : 'لم يحدد بعد')}</span>}</td>
+            <td>{['confirmed', 'assigned'].includes(order.status) 
+            ? <select aria-label={`اختيار مندوب الاستلام للطلب ${order.id}`} 
+            value={order.pickupDriver?._id || order.assignedDriver?._id || ''} 
+            onChange={(event) => handleAssignment(order._id, event.target.value, 'pickup')}
+             disabled={drivers.length === 0} 
+             style={{ border: '1px solid var(--line)', 
+             borderRadius: 6,
+              background: '#fff', padding: '7px 8px', 
+              color: order.pickupDriver || order.assignedDriver ? 'var(--green)' 
+              : 'var(--muted)', fontSize: 10 }}>
+                <option value="">اختار مندوب الاستلام</option>
+                {drivers.map((driver) => <option key={driver._id} value={driver._id}>{driver.displayName || driver.username}</option>)}</select> : <span>{order.pickupDriver?.displayName || order.pickupDriver?.username || order.assignedDriver?.displayName || order.assignedDriver?.username || 'غير محدد'}</span>}</td>
+            <td>
+              <select aria-label={`اختيار مندوب التسليم للطلب ${order.id}`}
+               value={order.deliveryDriver?._id || ''} 
+               onChange={(event) => handleAssignment(order._id, event.target.value, 'delivery')}
+                disabled={drivers.length === 0}
+                 style={{ border: '1px solid var(--line)',
+                  borderRadius: 6, background: '#fff',
+                   padding: '7px 8px', color: order.deliveryDriver ? 'var(--green)' 
+                   : 'var(--muted)', fontSize: 10 }}>
+              
+              <option
+               value="">{drivers.length ? 'اختار مندوب التسليم' : 'لا يوجد مندوبون نشطون'}
+               </option>{drivers.map((driver) => <option key={driver._id} value={driver._id}>{driver.displayName || driver.username}</option>)}</select></td>
           </tr>)}
           {loading && <tr><td colSpan="6" style={{ padding: 25, color: 'var(--muted)', textAlign: 'center' }}>جارٍ تحميل الطلبات...</td></tr>}
           {!loading && currentOrders.length === 0 && <tr><td colSpan="6" style={{ padding: 25, color: 'var(--muted)', textAlign: 'center' }}>لا توجد طلبات نشطة حاليًا</td></tr>}
@@ -176,18 +229,42 @@ function AdminPage() {
       </section>
 
       <section style={{ marginTop: 25 }}>
-        <SectionHeading title="الخدمات ورسومها" note="الخدمة تضيف أو تخصم من سعر القطعة، والتغيير يطبق على الطلبات الجديدة" action={<span className="status-pill">{catalogServices.filter((service) => service.active).length.toLocaleString('ar-EG')} خدمة نشطة</span>} />
+        <SectionHeading title="الخدمات" note="السعر النهائي يتحدد لكل تركيبة قطعة وخدمة على حدة" action={<span className="status-pill">{catalogServices.filter((service) => service.active).length.toLocaleString('ar-EG')} خدمة نشطة</span>} />
         <form className="panel grid grid-cols-1 gap-3 p-4 sm:grid-cols-[1fr_1.4fr_140px_160px_auto]" onSubmit={createService}>
           <div className="form-field"><label htmlFor="new-service-name">اسم الخدمة</label><input id="new-service-name" value={serviceForm.name} onChange={(event) => setServiceForm((current) => ({ ...current, name: event.target.value }))} required minLength={2} maxLength={80} /></div>
           <div className="form-field"><label htmlFor="new-service-detail">الوصف</label><input id="new-service-detail" value={serviceForm.detail} onChange={(event) => setServiceForm((current) => ({ ...current, detail: event.target.value }))} maxLength={240} /></div>
-          <div className="form-field"><label htmlFor="new-service-extra">الإضافة أو الخصم (ج.م)</label><input id="new-service-extra" type="number" step="0.01" value={serviceForm.extra} onChange={(event) => setServiceForm((current) => ({ ...current, extra: event.target.value }))} required /></div>
+          <div className="form-field"><label htmlFor="new-service-extra">قيمة ابتدائية (ج.م)</label><input id="new-service-extra" type="number" step="0.01" value={serviceForm.extra} onChange={(event) => setServiceForm((current) => ({ ...current, extra: event.target.value }))} required /></div>
           <div className="form-field"><label htmlFor="new-service-apply-to">تطبيق الخدمة</label><select id="new-service-apply-to" value={serviceForm.applyTo} onChange={(event) => setServiceForm((current) => ({ ...current, applyTo: event.target.value }))}><option value="item">على كل قطعة</option><option value="order">على الطلب</option></select></div>
           <button type="submit" className="primary-button self-end" disabled={catalogBusy}><Plus size={15} /> إضافة خدمة</button>
         </form>
-        <div className="panel table-wrap" style={{ marginTop: 10 }}><table className="data-table"><thead><tr><th>الخدمة</th><th>الوصف</th><th>الإضافة أو الخصم (ج.م)</th><th>التطبيق</th><th>الحالة</th><th>إجراء</th></tr></thead><tbody>
+        <div className="panel table-wrap" style={{ marginTop: 10 }}><table className="data-table"><thead><tr><th>الخدمة</th><th>الوصف</th><th>القيمة الابتدائية (ج.م)</th><th>التطبيق</th><th>الحالة</th><th>إجراء</th></tr></thead><tbody>
           {catalogServices.map((service) => { const draft = serviceDrafts[service._id] || service; return <tr key={service._id}><td><input aria-label={`اسم الخدمة ${service.name}`} value={draft.name} onChange={(event) => setServiceDrafts((current) => ({ ...current, [service._id]: { ...draft, name: event.target.value } }))} /></td><td><input aria-label={`وصف الخدمة ${service.name}`} value={draft.detail} onChange={(event) => setServiceDrafts((current) => ({ ...current, [service._id]: { ...draft, detail: event.target.value } }))} /></td><td><input aria-label={`سعر الخدمة ${service.name}`} type="number" step="0.01" value={draft.extra} onChange={(event) => setServiceDrafts((current) => ({ ...current, [service._id]: { ...draft, extra: event.target.value } }))} /></td><td><select aria-label={`نوع تطبيق الخدمة ${service.name}`} value={draft.applyTo} onChange={(event) => setServiceDrafts((current) => ({ ...current, [service._id]: { ...draft, applyTo: event.target.value } }))}><option value="item">على كل قطعة</option><option value="order">على الطلب</option></select></td><td><StatusPill tone={service.active ? 'success' : 'gray'}>{service.active ? 'نشطة' : 'مخفية'}</StatusPill></td><td><div style={{ display: 'flex', gap: 6 }}><button type="button" className="secondary-button" style={{ minHeight: 32, paddingInline: 9 }} disabled={catalogBusy} onClick={() => saveService(service)}>حفظ</button><button type="button" className="secondary-button" style={{ minHeight: 32, paddingInline: 9 }} disabled={catalogBusy} onClick={() => toggleCatalogRecord('service', service)}>{service.active ? 'إخفاء' : 'تفعيل'}</button></div></td></tr> })}
           {catalogLoading && <tr><td colSpan="6" style={{ padding: 20, color: 'var(--muted)', textAlign: 'center' }}>جارٍ تحميل الخدمات...</td></tr>}
           {!catalogLoading && catalogServices.length === 0 && <tr><td colSpan="6" style={{ padding: 20, color: 'var(--muted)', textAlign: 'center' }}>لا توجد خدمات مسجلة بعد</td></tr>}
+        </tbody></table></div>
+      </section>
+      <section style={{ marginTop: 25 }}>
+        <SectionHeading title="سعر كل قطعة حسب الخدمة" note="السعر هنا هو سعر القطعة النهائي للخدمة المختارة" />
+        <div className="form-field" style={{ maxWidth: 360, marginBottom: 12 }}>
+          <label htmlFor="pair-price-service">الخدمة</label>
+          <select id="pair-price-service" value={selectedPriceService?._id || ''} onChange={(event) => setPriceServiceId(event.target.value)} disabled={itemServices.length === 0}>
+            {itemServices.length === 0 && <option value="">لا توجد خدمات للقطع</option>}
+            {itemServices.map((service) => <option key={service._id} value={service._id}>{service.name}</option>)}
+          </select>
+        </div>
+        <div className="panel table-wrap"><table className="data-table"><thead><tr><th>القطعة</th><th>القسم</th><th>الخدمة</th><th>السعر النهائي (ج.م)</th><th>إجراء</th></tr></thead><tbody>
+          {catalogItems.map((item) => {
+            const service = selectedPriceService
+            const key = service ? `${item._id}:${service._id}` : ''
+            const price = service ? pairPriceDrafts[key] ?? getItemServicePrice(item._id, service._id) ?? '' : ''
+            return <tr key={item._id}>
+              <td>{item.name}</td><td>{item.category}</td><td>{service?.name || '—'}</td>
+              <td><input aria-label={`سعر ${item.name} مع ${service?.name || 'الخدمة'}`} type="number" min="0" step="0.01" value={price} disabled={!service} onChange={(event) => setPairPriceDrafts((current) => ({ ...current, [key]: event.target.value }))} /></td>
+              <td><button type="button" className="secondary-button" style={{ minHeight: 32, paddingInline: 9 }} disabled={catalogBusy || !service} onClick={() => savePairPrice(item)}>حفظ السعر</button></td>
+            </tr>
+          })}
+          {catalogLoading && <tr><td colSpan="5" style={{ padding: 20, color: 'var(--muted)', textAlign: 'center' }}>جارٍ تحميل الأسعار...</td></tr>}
+          {!catalogLoading && catalogItems.length === 0 && <tr><td colSpan="5" style={{ padding: 20, color: 'var(--muted)', textAlign: 'center' }}>أضف قطعًا لتحديد أسعارها حسب الخدمة</td></tr>}
         </tbody></table></div>
       </section>
       {(catalogError || catalogMessage) && <p role={catalogError ? 'alert' : 'status'} style={{ marginTop: 12, color: catalogError ? '#a13d32' : 'var(--green)', fontSize: 11 }}>{catalogError || catalogMessage}</p>}

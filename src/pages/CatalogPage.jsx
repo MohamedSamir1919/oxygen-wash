@@ -7,7 +7,7 @@ import { PageHeading } from '../components/Shared.jsx'
 function CatalogPage() {
   const [categoryIndex, setCategoryIndex] = useState(0)
   const [serviceId, setServiceId] = useState('')
-  const { addItem, cartCount, total, catalogItems, catalogServices, catalogLoading, catalogError } = useOrder()
+  const { addItem, cartCount, total, catalogItems, catalogServices, catalogLoading, catalogError, getItemServicePrice } = useOrder()
   const categories = [...new Set(catalogItems.map((item) => item.category))]
   const category = categories[categoryIndex] || categories[0]
   const itemServices = catalogServices.filter((service) => service.applyTo === 'item')
@@ -22,7 +22,7 @@ function CatalogPage() {
       <section className="panel" style={{ padding: '18px 20px 20px' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}><div><h2 className="section-title">نوع الخدمة</h2><p className="section-note">اختيارك هيتطبق على القطع اللي هتضيفها</p></div><Sparkles size={17} color="#16765c" /></div>
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2" style={{ marginTop: 15 }}>
-          {itemServices.map((service) => <label key={service._id} className={`service-choice${service._id === (selectedService?._id || serviceId) ? ' selected' : ''}`}><input type="radio" name="service" checked={service._id === (selectedService?._id || serviceId)} onChange={() => setServiceId(service._id)} /><span><strong>{service.name}</strong><span>{service.detail}{service.extra > 0 ? ` · +${service.extra} ج.م` : service.extra < 0 ? ` · وفر ${Math.abs(service.extra)} ج.م` : ''}</span></span></label>)}
+          {itemServices.map((service) => <label key={service._id} className={`service-choice${service._id === (selectedService?._id || serviceId) ? ' selected' : ''}`}><input type="radio" name="service" checked={service._id === (selectedService?._id || serviceId)} onChange={() => setServiceId(service._id)} /><span><strong>{service.name}</strong><span>{service.detail}</span></span></label>)}
           {itemServices.length === 0 && <p className="section-note">لا توجد خدمات للقطع متاحة حاليًا.</p>}
         </div>
       </section>
@@ -35,7 +35,7 @@ function CatalogPage() {
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4" style={{ marginTop: 15 }}>
           {catalogItems.filter((item) => item.category === category).map((item) => <article className="item-card" key={item._id}>
             <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}><span className="item-symbol"><Shirt size={19} /></span><button className="add-item" aria-label={`أضف ${item.name}`} disabled={!selectedService} onClick={() => addItem(item, selectedService)}><Plus size={17} /></button></div>
-            <div><h3>{item.name}</h3><div className="item-price">{Math.max(8, item.price + (selectedService?.extra || 0))} ج.م {selectedService && <span style={{ color: '#a6b0aa' }}>· {selectedService.name}</span>}</div></div>
+            <div><h3>{item.name}</h3><div className="item-price">{selectedService ? `${getItemServicePrice(item._id, selectedService._id) ?? '—'} ج.م` : '—'} {selectedService && <span style={{ color: '#a6b0aa' }}>· {selectedService.name}</span>}</div></div>
           </article>)}
           {catalogItems.length === 0 && <p className="section-note">لا توجد قطع متاحة حاليًا.</p>}
         </div>
