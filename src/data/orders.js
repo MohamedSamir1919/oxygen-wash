@@ -8,16 +8,23 @@ const statusDetails = {
 }
 
 export function normalizeOrder(order) {
-  const currentStatus = statusDetails[order.status] || statusDetails.confirmed
+  const value = order && typeof order === 'object' ? order : {}
+  const currentStatus = statusDetails[value.status] || statusDetails.confirmed
+  const lineItems = Array.isArray(value.items) ? value.items.filter((item) => item && typeof item === 'object') : []
+  const createdAt = value.createdAt ? new Date(value.createdAt) : null
   return {
-    ...order,
-    id: order.orderNumber,
-    date: new Date(order.createdAt).toLocaleString('ar-EG', { dateStyle: 'medium', timeStyle: 'short' }),
-    items: order.items.map((item) => `${item.quantity} ${item.name}`).join('، '),
+    ...value,
+    id: typeof value.orderNumber === 'string' ? value.orderNumber : 'طلب غير معروف',
+    date: createdAt && !Number.isNaN(createdAt.getTime())
+      ? createdAt.toLocaleString('ar-EG', { dateStyle: 'medium', timeStyle: 'short' })
+      : '—',
+    lineItems,
+    items: lineItems.map((item) => `${item.quantity || 0} ${item.name || 'قطعة'}`).join('، '),
     status: currentStatus.label,
-    statusType: order.status === 'delivered' ? 'success' : 'warning',
+    statusType: value.status === 'delivered' ? 'success' : 'warning',
     step: currentStatus.step,
-    customerName: order.customer?.name || '',
+    customer: value.customer && typeof value.customer === 'object' ? value.customer : {},
+    customerName: value.customer?.name || '',
   }
 }
 

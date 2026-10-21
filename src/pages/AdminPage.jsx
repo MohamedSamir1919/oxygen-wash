@@ -25,7 +25,7 @@ function AdminPage() {
     return { day: date.toLocaleDateString('ar-EG', { weekday: 'short' }), value }
   })
   const weeklyTotal = weeklyActivity.reduce((sum, day) => sum + day.value, 0)
-  const mostOrderedItems = orders.flatMap((order) => order.items).reduce((totals, item) => ({ ...totals, [item.name]: (totals[item.name] || 0) + item.quantity }), {})
+  const mostOrderedItems = orders.flatMap((order) => order.lineItems).reduce((totals, item) => ({ ...totals, [item.name]: (totals[item.name] || 0) + (Number(item.quantity) || 0) }), {})
   const popularItems = Object.entries(mostOrderedItems).sort((first, second) => second[1] - first[1]).slice(0, 4)
 
   async function handleAssignment(orderId, driverId) {

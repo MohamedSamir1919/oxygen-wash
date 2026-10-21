@@ -12,10 +12,10 @@ import DriverPage from './pages/DriverPage.jsx'
 import OrdersPage from './pages/OrdersPage.jsx'
 import StaffLoginPage from './pages/StaffLoginPage.jsx'
 import StaffSignupPage from './pages/StaffSignupPage.jsx'
-
+import { HashRouter } from 'react-router-dom';
 function App() {
   return (
-    <BrowserRouter>
+    <HashRouter>
       <AuthProvider>
         <OrderProvider>
           <Routes>
@@ -41,7 +41,7 @@ function App() {
           </Routes>
         </OrderProvider>
       </AuthProvider>
-    </BrowserRouter>
+    </HashRouter>
   )
 }
 

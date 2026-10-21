@@ -9,9 +9,23 @@ const LATEST_ORDER_KEY = 'oxygen_latest_order'
 
 async function requestJson(path, options = {}) {
   const response = await fetch(`${API_URL}${path}`, options)
-  const result = await response.json()
+  let result = {}
+  try {
+    result = await response.json()
+  } catch {
+    result = {}
+  }
   if (!response.ok) throw new Error(result.message || 'تعذر الاتصال بالخادم')
-  return result
+  return result && typeof result === 'object' ? result : {}
+}
+
+function readTrackingTokens() {
+  try {
+    const tokens = JSON.parse(localStorage.getItem(TRACKING_KEY) || '[]')
+    return Array.isArray(tokens) ? tokens.filter((value) => typeof value === 'string') : []
+  } catch {
+    return []
+  }
 }
 
 export function OrderProvider({ children }) {
@@ -44,18 +58,22 @@ export function OrderProvider({ children }) {
         if (user?.role === 'admin' || user?.role === 'driver') {
           const route = user.role === 'admin' ? '/admin/orders' : '/driver/orders'
           const result = await requestJson(route, { headers: { Authorization: `Bearer ${token}` } })
-          if (active) setOrders(result.orders.map(normalizeOrder))
+          if (active) setOrders(Array.isArray(result.orders) ? result.orders.map(normalizeOrder) : [])
           if (user.role === 'admin') {
             const driverResult = await requestJson('/admin/orders/drivers', { headers: { Authorization: `Bearer ${token}` } })
-            if (active) setDrivers(driverResult.drivers)
+            if (active) setDrivers(Array.isArray(driverResult.drivers) ? driverResult.drivers : [])
           }
         } else {
-          const trackingTokens = JSON.parse(localStorage.getItem(TRACKING_KEY) || '[]')
-          const results = await Promise.all(trackingTokens.map((trackingToken) => requestJson(`/orders/track/${trackingToken}`)))
-          if (active) setOrders(results.map((result) => normalizeOrder(result.order)))
+          const trackingTokens = readTrackingTokens()
+          const results = await Promise.allSettled(trackingTokens.map((trackingToken) => requestJson(`/orders/track/${trackingToken}`)))
+          if (active) setOrders(results.filter((result) => result.status === 'fulfilled' && result.value.order).map((result) => normalizeOrder(result.value.order)))
         }
       } catch (loadError) {
-        if (active) setError(loadError.message || 'تعذر تحميل الطلبات')
+        if (active) {
+          setOrders([])
+          setDrivers([])
+          setError(loadError.message || 'تعذر تحميل الطلبات')
+        }
       } finally {
         if (active) setLoading(false)
       }
@@ -73,12 +91,16 @@ export function OrderProvider({ children }) {
     requestJson(isAdmin ? '/admin/catalog' : '/catalog', isAdmin ? { headers: { Authorization: `Bearer ${token}` } } : {})
       .then((result) => {
         if (!active) return
-        setCatalogItems(result.items)
-        setCatalogServices(result.services)
+        setCatalogItems(Array.isArray(result.items) ? result.items : [])
+        setCatalogServices(Array.isArray(result.services) ? result.services : [])
         setCatalogError('')
       })
       .catch((catalogLoadError) => {
-        if (active) setCatalogError(catalogLoadError.message || 'تعذر تحميل الكتالوج')
+        if (active) {
+          setCatalogItems([])
+          setCatalogServices([])
+          setCatalogError(catalogLoadError.message || 'تعذر تحميل الكتالوج')
+        }
       })
       .finally(() => {
         if (active) setCatalogLoading(false)
@@ -115,7 +137,7 @@ export function OrderProvider({ children }) {
       }),
     })
     const order = normalizeOrder(result.order)
-    const trackingTokens = JSON.parse(localStorage.getItem(TRACKING_KEY) || '[]')
+    const trackingTokens = readTrackingTokens()
     localStorage.setItem(TRACKING_KEY, JSON.stringify([result.order.trackingToken, ...trackingTokens]))
     localStorage.setItem(LATEST_ORDER_KEY, order.id)
     setLatestOrderId(order.id)
