@@ -28,9 +28,9 @@ function AdminPage() {
   const mostOrderedItems = orders.flatMap((order) => order.lineItems).reduce((totals, item) => ({ ...totals, [item.name]: (totals[item.name] || 0) + (Number(item.quantity) || 0) }), {})
   const popularItems = Object.entries(mostOrderedItems).sort((first, second) => second[1] - first[1]).slice(0, 4)
 
-  async function handleAssignment(orderId, driverId) {
+  async function handleAssignment(orderId, driverId, phase) {
     try {
-      await assignOrder(orderId, driverId)
+      await assignOrder(orderId, driverId, phase)
     } catch (assignmentError) {
       window.alert(assignmentError.message || 'تعذر إسناد الطلب')
     }
@@ -146,10 +146,17 @@ function AdminPage() {
       <section style={{ marginTop: 25 }}>
         <SectionHeading title="الطلبات النشطة" note="تابع الإسناد والحالة المسجلة" action={<span className="status-pill warning">{currentOrders.length} طلبات تحتاج متابعة</span>} />
         {error && <p role="alert" style={{ marginBottom: 10, color: '#a13d32', fontSize: 12 }}>{error}</p>}
-        <div className="panel table-wrap"><table className="data-table"><thead><tr><th>رقم الطلب</th><th>العميل / القطع</th><th>الموعد</th><th>الحالة</th><th>المندوب</th></tr></thead><tbody>
-          {currentOrders.map((order) => <tr key={order._id}><td style={{ fontWeight: 700 }}>{order.id}</td><td>{order.customerName}<div className="order-muted">{order.customer?.phone} · {order.items}</div></td><td>{order.pickupWindow}<div className="order-muted">التسليم المتوقع: {new Date(order.expectedDeliveryAt).toLocaleDateString('ar-EG')}</div></td><td><StatusPill tone="warning">{getOrderStatusLabel(order.status)}</StatusPill>{order.status === 'picked_up' && <button className="secondary-button" style={{ minHeight: 30, marginTop: 6, paddingInline: 8 }} onClick={() => handleStatusChange(order._id, 'processing')}>بدء التجهيز</button>}{order.status === 'processing' && <button className="secondary-button" style={{ minHeight: 30, marginTop: 6, paddingInline: 8 }} onClick={() => handleStatusChange(order._id, 'ready_for_delivery')}>جاهز للتسليم</button>}</td><td><select aria-label={`إسناد المندوب للطلب ${order.id}`} value={order.assignedDriver?._id || ''} onChange={(event) => handleAssignment(order._id, event.target.value)} disabled={drivers.length === 0 || order.status === 'delivered'} style={{ border: '1px solid var(--line)', borderRadius: 6, background: '#fff', padding: '7px 8px', color: order.assignedDriver ? 'var(--green)' : 'var(--muted)', fontSize: 10 }}><option value="">اختار مندوب</option>{drivers.map((driver) => <option key={driver._id} value={driver._id}>{driver.displayName || driver.username}</option>)}</select></td></tr>)}
-          {loading && <tr><td colSpan="5" style={{ padding: 25, color: 'var(--muted)', textAlign: 'center' }}>جارٍ تحميل الطلبات...</td></tr>}
-          {!loading && currentOrders.length === 0 && <tr><td colSpan="5" style={{ padding: 25, color: 'var(--muted)', textAlign: 'center' }}>لا توجد طلبات نشطة حاليًا</td></tr>}
+        <div className="panel table-wrap"><table className="data-table"><thead><tr><th>رقم الطلب</th><th>العميل / القطع</th><th>الموعد</th><th>الحالة</th><th>مندوب الاستلام</th><th>مندوب التسليم</th></tr></thead><tbody>
+          {currentOrders.map((order) => <tr key={order._id}>
+            <td style={{ fontWeight: 700 }}>{order.id}</td>
+            <td>{order.customerName}<div className="order-muted">{order.customer?.phone} · {order.items}</div></td>
+            <td>{order.pickupWindow}<div className="order-muted">التسليم المتوقع: {order.expectedDeliveryAt ? new Date(order.expectedDeliveryAt).toLocaleDateString('ar-EG') : 'غير محدد'}</div></td>
+            <td><StatusPill tone="warning">{getOrderStatusLabel(order.status)}</StatusPill>{order.status === 'processing' && <button className="secondary-button" style={{ minHeight: 30, marginTop: 6, paddingInline: 8 }} disabled={!order.deliveryDriver} onClick={() => handleStatusChange(order._id, 'ready_for_delivery')}>جاهز للتسليم</button>}</td>
+            <td>{['confirmed', 'assigned'].includes(order.status) ? <select aria-label={`اختيار مندوب الاستلام للطلب ${order.id}`} value={order.pickupDriver?._id || order.assignedDriver?._id || ''} onChange={(event) => handleAssignment(order._id, event.target.value, 'pickup')} disabled={drivers.length === 0} style={{ border: '1px solid var(--line)', borderRadius: 6, background: '#fff', padding: '7px 8px', color: order.pickupDriver || order.assignedDriver ? 'var(--green)' : 'var(--muted)', fontSize: 10 }}><option value="">اختار مندوب الاستلام</option>{drivers.map((driver) => <option key={driver._id} value={driver._id}>{driver.displayName || driver.username}</option>)}</select> : <span>{order.pickupDriver?.displayName || order.pickupDriver?.username || order.assignedDriver?.displayName || order.assignedDriver?.username || 'غير محدد'}</span>}</td>
+            <td>{['processing', 'ready_for_delivery'].includes(order.status) ? <select aria-label={`اختيار مندوب التسليم للطلب ${order.id}`} value={order.deliveryDriver?._id || ''} onChange={(event) => handleAssignment(order._id, event.target.value, 'delivery')} disabled={drivers.length === 0} style={{ border: '1px solid var(--line)', borderRadius: 6, background: '#fff', padding: '7px 8px', color: order.deliveryDriver ? 'var(--green)' : 'var(--muted)', fontSize: 10 }}><option value="">اختار مندوب التسليم</option>{drivers.map((driver) => <option key={driver._id} value={driver._id}>{driver.displayName || driver.username}</option>)}</select> : <span>{order.deliveryDriver?.displayName || order.deliveryDriver?.username || (order.status === 'delivered' ? 'تم التسليم' : 'لم يحدد بعد')}</span>}</td>
+          </tr>)}
+          {loading && <tr><td colSpan="6" style={{ padding: 25, color: 'var(--muted)', textAlign: 'center' }}>جارٍ تحميل الطلبات...</td></tr>}
+          {!loading && currentOrders.length === 0 && <tr><td colSpan="6" style={{ padding: 25, color: 'var(--muted)', textAlign: 'center' }}>لا توجد طلبات نشطة حاليًا</td></tr>}
         </tbody></table></div>
       </section>
 

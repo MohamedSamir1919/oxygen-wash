@@ -24,7 +24,7 @@ export function StatusPill({ children, tone = 'success' }) {
 
 export function OrderRow({ order }) {
   const tone = order.statusType === 'warning' ? 'warning' : order.statusType === 'gray' ? 'gray' : 'success'
-  return <div className="order-row"><div><div className="order-number">{order.id}</div><div className="order-muted">{order.items}</div></div><div>{order.date}</div><div>{order.total} ج.م</div><div><StatusPill tone={tone}>{order.status}</StatusPill></div></div>
+  return <div className="order-row"><div><div className="order-number">{order.id || 'طلب غير معروف'}</div><div className="order-muted">{order.items || 'لا توجد تفاصيل للقطع'}</div></div><div>{order.date || '—'}</div><div>{Number(order.total) || 0} ج.م</div><div><StatusPill tone={tone}>{order.statusLabel || order.status || 'حالة غير معروفة'}</StatusPill></div></div>
 }
 
 export function EmptyState({ title, text, to, action }) {

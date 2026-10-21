@@ -11,7 +11,7 @@ function DriverPage() {
   const readyTasks = orders.filter((order) => order.status === 'ready_for_delivery')
 
   async function completeTask(order) {
-    const nextStatus = order.status === 'assigned' ? 'picked_up' : 'delivered'
+    const nextStatus = order.status === 'assigned' ? 'picked_up' : order.status === 'picked_up' ? 'processing' : 'delivered'
     try {
       await updateOrderStatus(order._id, nextStatus)
     } catch (taskError) {
@@ -42,7 +42,7 @@ function DriverPage() {
                 <div className="order-muted" style={{ marginTop: 8 }}>{task.lineItems.map((item) => `${item.quantity || 0} ${item.name || 'قطعة'} · ${item.service || 'خدمة'}`).join('، ') || 'لا توجد تفاصيل للقطع'}</div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginTop: 13, borderTop: '1px solid #f0f2ef', paddingTop: 12 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}><Shirt size={15} color="#16765c" /><span style={{ fontSize: 10 }}>{task.lineItems.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0)} قطعة</span></div>
-                  <div style={{ display: 'flex', gap: 7 }}><a className="icon-button" href={`tel:${task.customer.phone}`} aria-label={`اتصل بالعميل ${task.customer.name}`}><Phone size={15} /></a><a className="icon-button" href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(task.customer.address)}`} target="_blank" rel="noreferrer" aria-label="افتح الموقع على خرائط جوجل"><Navigation size={15} /></a>{(task.status === 'assigned' || task.status === 'ready_for_delivery') && <button className="primary-button" style={{ minHeight: 35, paddingInline: 11 }} onClick={() => completeTask(task)}>{task.status === 'assigned' ? 'تم الاستلام' : 'تم التسليم'} <Check size={14} /></button>}</div>
+                  <div style={{ display: 'flex', gap: 7 }}><a className="icon-button" href={`tel:${task.customer.phone}`} aria-label={`اتصل بالعميل ${task.customer.name}`}><Phone size={15} /></a><a className="icon-button" href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(task.customer.address)}`} target="_blank" rel="noreferrer" aria-label="افتح الموقع على خرائط جوجل"><Navigation size={14} /></a>{['assigned', 'picked_up', 'ready_for_delivery'].includes(task.status) && <button className="primary-button" style={{ minHeight: 35, paddingInline: 11 }} onClick={() => completeTask(task)}>{task.status === 'assigned' ? 'تم الاستلام من العميل' : task.status === 'picked_up' ? 'وصلت للمغسلة' : 'تم التسليم'} <Check size={14} /></button>}</div>
                 </div>
               </div>
             </div>

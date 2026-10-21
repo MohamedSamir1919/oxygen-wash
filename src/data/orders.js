@@ -20,11 +20,13 @@ export function normalizeOrder(order) {
       : '—',
     lineItems,
     items: lineItems.map((item) => `${item.quantity || 0} ${item.name || 'قطعة'}`).join('، '),
-    status: currentStatus.label,
+    status: typeof value.status === 'string' ? value.status : 'confirmed',
+    statusLabel: currentStatus.label,
     statusType: value.status === 'delivered' ? 'success' : 'warning',
     step: currentStatus.step,
     customer: value.customer && typeof value.customer === 'object' ? value.customer : {},
     customerName: value.customer?.name || '',
+    statusHistory: Array.isArray(value.statusHistory) ? value.statusHistory : [],
   }
 }
 

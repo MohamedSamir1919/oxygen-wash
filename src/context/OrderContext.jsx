@@ -9,12 +9,7 @@ const LATEST_ORDER_KEY = 'oxygen_latest_order'
 
 async function requestJson(path, options = {}) {
   const response = await fetch(`${API_URL}${path}`, options)
-  let result = {}
-  try {
-    result = await response.json()
-  } catch {
-    result = {}
-  }
+  const result = await response.json().catch(() => ({}))
   if (!response.ok) throw new Error(result.message || 'تعذر الاتصال بالخادم')
   return result && typeof result === 'object' ? result : {}
 }
@@ -58,10 +53,10 @@ export function OrderProvider({ children }) {
         if (user?.role === 'admin' || user?.role === 'driver') {
           const route = user.role === 'admin' ? '/admin/orders' : '/driver/orders'
           const result = await requestJson(route, { headers: { Authorization: `Bearer ${token}` } })
-          if (active) setOrders(Array.isArray(result.orders) ? result.orders.map(normalizeOrder) : [])
+          if (active) setOrders(Array.isArray(result.orders) ? result.orders.filter((order) => order && typeof order === 'object').map(normalizeOrder) : [])
           if (user.role === 'admin') {
             const driverResult = await requestJson('/admin/orders/drivers', { headers: { Authorization: `Bearer ${token}` } })
-            if (active) setDrivers(Array.isArray(driverResult.drivers) ? driverResult.drivers : [])
+            if (active) setDrivers(Array.isArray(driverResult.drivers) ? driverResult.drivers.filter((driver) => driver && typeof driver === 'object') : [])
           }
         } else {
           const trackingTokens = readTrackingTokens()
@@ -91,8 +86,8 @@ export function OrderProvider({ children }) {
     requestJson(isAdmin ? '/admin/catalog' : '/catalog', isAdmin ? { headers: { Authorization: `Bearer ${token}` } } : {})
       .then((result) => {
         if (!active) return
-        setCatalogItems(Array.isArray(result.items) ? result.items : [])
-        setCatalogServices(Array.isArray(result.services) ? result.services : [])
+        setCatalogItems(Array.isArray(result.items) ? result.items.filter((item) => item && typeof item === 'object') : [])
+        setCatalogServices(Array.isArray(result.services) ? result.services.filter((service) => service && typeof service === 'object') : [])
         setCatalogError('')
       })
       .catch((catalogLoadError) => {
@@ -136,6 +131,7 @@ export function OrderProvider({ children }) {
         deliveryHours: details.delivery,
       }),
     })
+    if (!result.order || typeof result.order.trackingToken !== 'string') throw new Error('استجابة الطلب غير مكتملة')
     const order = normalizeOrder(result.order)
     const trackingTokens = readTrackingTokens()
     localStorage.setItem(TRACKING_KEY, JSON.stringify([result.order.trackingToken, ...trackingTokens]))
@@ -147,12 +143,13 @@ export function OrderProvider({ children }) {
     return order
   }
 
-  async function assignOrder(orderId, driverId) {
+  async function assignOrder(orderId, driverId, phase) {
     const result = await requestJson(`/admin/orders/${orderId}/assign`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ driverId }),
+      body: JSON.stringify({ driverId, phase }),
     })
+    if (!result.order || typeof result.order !== 'object') throw new Error('استجابة تحديث الطلب غير مكتملة')
     const updatedOrder = normalizeOrder(result.order)
     setOrders((current) => current.map((order) => order._id === orderId ? updatedOrder : order))
     return updatedOrder
@@ -165,6 +162,7 @@ export function OrderProvider({ children }) {
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
       body: JSON.stringify({ status }),
     })
+    if (!result.order || typeof result.order !== 'object') throw new Error('استجابة تحديث الطلب غير مكتملة')
     const updatedOrder = normalizeOrder(result.order)
     setOrders((current) => current.map((order) => order._id === orderId ? updatedOrder : order))
     return updatedOrder
@@ -177,9 +175,11 @@ export function OrderProvider({ children }) {
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
       body: JSON.stringify(values),
     })
-    if (kind === 'item') setCatalogItems((current) => [...current, result.item].sort((first, second) => first.category.localeCompare(second.category, 'ar')))
-    else setCatalogServices((current) => [...current, result.service].sort((first, second) => first.name.localeCompare(second.name, 'ar')))
-    return kind === 'item' ? result.item : result.service
+    const record = kind === 'item' ? result.item : result.service
+    if (!record || typeof record !== 'object') throw new Error('استجابة حفظ الكتالوج غير مكتملة')
+    if (kind === 'item') setCatalogItems((current) => [...current, record].sort((first, second) => (first.category || '').localeCompare(second.category || '', 'ar')))
+    else setCatalogServices((current) => [...current, record].sort((first, second) => (first.name || '').localeCompare(second.name || '', 'ar')))
+    return record
   }
 
   async function updateCatalogRecord(kind, recordId, values) {
@@ -190,8 +190,9 @@ export function OrderProvider({ children }) {
       body: JSON.stringify(values),
     })
     const record = kind === 'item' ? result.item : result.service
-    if (kind === 'item') setCatalogItems((current) => current.map((item) => item._id === recordId ? record : item).sort((first, second) => first.category.localeCompare(second.category, 'ar')))
-    else setCatalogServices((current) => current.map((service) => service._id === recordId ? record : service).sort((first, second) => first.name.localeCompare(second.name, 'ar')))
+    if (!record || typeof record !== 'object') throw new Error('استجابة تحديث الكتالوج غير مكتملة')
+    if (kind === 'item') setCatalogItems((current) => current.map((item) => item._id === recordId ? record : item).sort((first, second) => (first.category || '').localeCompare(second.category || '', 'ar')))
+    else setCatalogServices((current) => current.map((service) => service._id === recordId ? record : service).sort((first, second) => (first.name || '').localeCompare(second.name || '', 'ar')))
     return record
   }
 

@@ -1,4 +1,4 @@
-import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
+import { Navigate, Route, Routes } from 'react-router-dom'
 import { OrderProvider } from './context/OrderContext.jsx'
 import { AuthProvider } from './context/AuthContext.jsx'
 import AppShell from './components/AppShell.jsx'
